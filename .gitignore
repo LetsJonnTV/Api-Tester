@@ -1,0 +1,15 @@
+.mcp-debug-tools/
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.vscode/
+.DS_Store
+build/
+dist/
+*.spec
+*.egg-info/
+.env
+.idea/
+*.log
+api_tester_config.json

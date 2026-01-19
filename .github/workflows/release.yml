@@ -1,0 +1,137 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+            artifact: api-tester-windows.exe
+            pyinstaller_args: --onefile --windowed --icon=icon.ico --name=API-Tester
+          - os: ubuntu-latest
+            name: Linux
+            artifact: api-tester-linux
+            pyinstaller_args: --onefile --name=API-Tester
+          - os: macos-latest
+            name: macOS
+            artifact: api-tester-macos
+            pyinstaller_args: --onefile --windowed --name=API-Tester
+
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Build executable
+        run: |
+          pyinstaller ${{ matrix.pyinstaller_args }} api_tester.py
+
+      - name: Rename artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          Move-Item -Path "dist/API-Tester.exe" -Destination "dist/${{ matrix.artifact }}"
+
+      - name: Rename artifact (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mv dist/API-Tester dist/${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Extract changelog for version
+        id: changelog
+        run: |
+          # Extrahiere den Changelog-Eintrag für diese Version
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          
+          # Finde den Abschnitt für diese Version im Changelog
+          # Sucht von "## [VERSION]" bis zum nächsten "## [" oder Ende
+          CHANGELOG=$(awk -v ver="$VERSION" '
+            BEGIN { found=0; content="" }
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "[" ver "]") > 0) found=1
+            }
+            found { content = content $0 "\n" }
+            END { print content }
+          ' CHANGELOG.md)
+          
+          # Fallback falls nichts gefunden
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="Release v$VERSION"
+          fi
+          
+          # Speichere in Datei für mehrzeilige Ausgabe
+          echo "$CHANGELOG" > changelog_extract.md
+          
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: API Tester Pro v${{ steps.version.outputs.VERSION }}
+          body_path: changelog_extract.md
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          files: |
+            artifacts/Windows/api-tester-windows.exe
+            artifacts/Linux/api-tester-linux
+            artifacts/macOS/api-tester-macos
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## 🚀 Release v${{ steps.version.outputs.VERSION }} created!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts:" >> $GITHUB_STEP_SUMMARY
+          echo "- 🪟 Windows: api-tester-windows.exe" >> $GITHUB_STEP_SUMMARY
+          echo "- 🐧 Linux: api-tester-linux" >> $GITHUB_STEP_SUMMARY
+          echo "- 🍎 macOS: api-tester-macos" >> $GITHUB_STEP_SUMMARY

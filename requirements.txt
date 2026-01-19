@@ -1,0 +1,5 @@
+ttkbootstrap>=1.10.0
+requests>=2.28.0
+
+# Build dependencies (optional, für lokales Bauen)
+# pyinstaller>=6.0.0
